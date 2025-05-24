@@ -346,7 +346,7 @@ ngx_backtrace_init_module(ngx_cycle_t *cycle)
     bcf = (ngx_backtrace_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_backtrace_module);
 
     if (!bcf->log) {
-        ngx_log_debug1(NGX_LOG_DEBUG_CORE, cycle->log, 0, "ngx_backtrace: the module is not in use");
+        ngx_log_debug0(NGX_LOG_DEBUG_CORE, cycle->log, 0, "ngx_backtrace: the module is not in use");
         return NGX_OK;
     }
 
