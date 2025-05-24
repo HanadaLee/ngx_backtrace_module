@@ -53,10 +53,10 @@ Backtrace Sample
 
 ```
 # tail -1 logs/error.log 
-2016/11/29 02:47:53 [error] 21810#0: ngx_backtrace_module: Got signal 11 (SIGSEGV), Saving the stacktrace in /tmp/nginx-crash.log
+2016/11/29 02:47:53 [error] 21810#0: ngx_backtrace: Got signal 11 (SIGSEGV), Saving the stacktrace in /tmp/nginx-crash.log
 # cat /tmp/nginx-crash.log
 +-------------------------------------------------------+
-| ngx_backtrace_module: Received signal 11 (SIGSEGV)
+| ngx_backtrace: Received signal 11 (SIGSEGV)
 +-------------------------------------------------------+
  Date: Tue Nov 29 02:47:53 2016
  Faulty address: 0xd3adbeef

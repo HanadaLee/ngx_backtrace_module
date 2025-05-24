@@ -171,7 +171,7 @@ ngx_init_error_signals (ngx_log_t *log)
 
         if (sigaction(sig->signo, &sa, NULL) == -1) {
             ngx_log_error(NGX_LOG_EMERG, log, ngx_errno,
-                          "ngx_backtrace_module: sigaction(%s) failed", sig->signame);
+                          "ngx_backtrace: sigaction(%s) failed", sig->signame);
             return NGX_ERROR;
         }
     }
@@ -207,26 +207,26 @@ ngx_error_signal_handler (int signo, siginfo_t *info, void *ptr) {
     
     if (sig == 0) {
         ngx_log_error(NGX_LOG_ERR, log, 0,
-            "ngx_backtrace_module: Wrong signal received from Kernel! Weird!!");
+            "ngx_backtrace: Wrong signal received from Kernel! Weird!!");
         return;
     }
 
     ngx_log_error(NGX_LOG_ERR, log, 0,
-                    "ngx_backtrace_module: Got signal %d (%s), Saving the stacktrace in %s", 
+                    "ngx_backtrace: Got signal %d (%s), Saving the stacktrace in %s", 
                     signo, sig->signame, (char *)log->file->name.data
     );
 
     fd = log->file->fd;
     if (fcntl(fd, F_GETFL) < 0) {
         ngx_log_error(NGX_LOG_ERR, log, 0,
-                    "ngx_backtrace_module: We can't write into the file %s, exiting.",
+                    "ngx_backtrace: We can't write into the file %s, exiting.",
                     (char *)log->file->name.data
         );
         goto bye;
     }
 
     dprintf(fd, "+-------------------------------------------------------+\n");
-    dprintf(fd, "| ngx_backtrace_module: Received signal %d (%s)\n", signo, sig->signame);
+    dprintf(fd, "| ngx_backtrace: Received signal %d (%s)\n", signo, sig->signame);
     dprintf(fd, "+-------------------------------------------------------+\n");
 
     crash_time = time(NULL);
@@ -248,7 +248,7 @@ ngx_error_signal_handler (int signo, siginfo_t *info, void *ptr) {
     sigemptyset(&sa.sa_mask);
     if (sigaction(signo, &sa, NULL) == -1) {
         ngx_log_error(NGX_LOG_ERR, log, ngx_errno,
-                      "ngx_backtrace_module: sigaction(%s) failed", sig->signame);
+                      "ngx_backtrace: sigaction(%s) failed", sig->signame);
     }
 
     if (bcf->max_stack_size == NGX_CONF_UNSET) {
@@ -260,7 +260,7 @@ ngx_error_signal_handler (int signo, siginfo_t *info, void *ptr) {
     ret = unw_getcontext(&uc);
     if (ret != UNW_ESUCCESS) {
         ngx_log_error(NGX_LOG_ERR, log, ngx_errno,
-                      "ngx_backtrace_module: Problems with unw_getcontext() ret=%d", ret);
+                      "ngx_backtrace: Problems with unw_getcontext() ret=%d", ret);
         goto invalid;
     }
 
@@ -320,8 +320,9 @@ ngx_backtrace_files(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     value = cf->args->elts;
     file = value[1];
 
-    ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0, 
-                "ngx_backtrace_module: Initializing the module saving in %s", file.data);
+    ngx_log_debug1(NGX_LOG_DEBUG_CORE, ngx_cycle->log, 0,
+                "ngx_backtrace: Initializing the module saving in %s",
+                file.data);
 
     if (ngx_conf_full_name(cf->cycle, &file, 1) != NGX_OK) {
         return NGX_CONF_ERROR;
@@ -345,7 +346,7 @@ ngx_backtrace_init_module(ngx_cycle_t *cycle)
     bcf = (ngx_backtrace_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_backtrace_module);
 
     if (!bcf->log) {
-        ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0, "ngx_backtrace_module: The module is not in use");
+        ngx_log_debug1(NGX_LOG_DEBUG_CORE, cycle->log, 0, "ngx_backtrace: the module is not in use");
         return NGX_OK;
     }
 
