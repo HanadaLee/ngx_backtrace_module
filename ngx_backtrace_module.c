@@ -14,6 +14,7 @@
 
 #include <libunwind.h> /* from -llibuwind */
 
+
 #if defined(REG_RIP)
 # define SIGSEGV_STACK_IA64
 # define REGFORMAT "%016lx"
@@ -25,27 +26,41 @@
 # define REGFORMAT "%x"
 #endif
 
-#define NGX_BACKTRACE_DEFAULT_STACK_MAX_SIZE 30
 
-static char *ngx_backtrace_files(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+#define NGX_BACKTRACE_FORMAT_PLAIN   0
+#define NGX_BACKTRACE_FORMAT_JSON    1
+
+
+static ngx_conf_enum_t  ngx_backtrace_format[] = {
+    { ngx_string("plain"), NGX_BACKTRACE_LOG_FORMAT_PLAIN },
+    { ngx_string("json"),  NGX_BACKTRACE_LOG_FORMAT_JSON },
+    { ngx_null_string, 0 }
+};
+
+
+static char *ngx_backtrace_files(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf);
 static void ngx_error_signal_handler(int signo, siginfo_t *info, void *secret);
 static ngx_int_t ngx_backtrace_init_module(ngx_cycle_t *cycle);
 static void *ngx_backtrace_create_conf(ngx_cycle_t *cycle);
+static char *ngx_backtrace_init_conf(ngx_cycle_t *cycle, void *conf);
 #if defined(nginx_version) && nginx_version >= 1005002
 static ngx_log_t *ngx_log_create(ngx_cycle_t *cycle, ngx_str_t *name);
 #endif
 
+
 typedef struct {
-    int     signo;
-    char   *signame;
-    char   *name;
-    void  (*handler)(int sig, siginfo_t *info, void *secret);
+    int         signo;
+    char       *signame;
+    char       *name;
+    void      (*handler)(int sig, siginfo_t *info, void *secret);
 } ngx_signal_t;
+
 
 typedef struct {
     ngx_log_t  *log;
-    ngx_int_t  max_stack_size;
 } ngx_backtrace_conf_t;
+
 
 static ngx_signal_t  ngx_backtrace_signals[] = {
     { SIGABRT, "SIGABRT", "", ngx_error_signal_handler },
@@ -59,29 +74,21 @@ static ngx_signal_t  ngx_backtrace_signals[] = {
     { 0, NULL, "", NULL }
 };
 
+
 typedef struct {
-    int signo;
-    int si_code;
+    int         signo;
+    int         si_code;
     const char *si_code_desc;
 } sig_action_map_t;
 
+
 static sig_action_map_t ngx_backtrace_si_codes[] = {
-    { SIGSEGV, SEGV_MAPERR, "SEGV_MAPERR (Address not mapped to object)" },
-    { SIGSEGV, SEGV_ACCERR, "SEGV_ACCERR (Invalid permissions for mapped object)" },
+    { SIGSEGV, SEGV_MAPERR, "SEGV_MAPERR (address not mapped to object)" },
+    { SIGSEGV, SEGV_ACCERR,
+      "SEGV_ACCERR (invalid permissions for mapped object)" },
     { SIGSEGV, -1,          "Unknown reason" }
 };
 
-const char *ngx_si_code2desc(int signo, int si_code) {
-    sig_action_map_t *p;
-
-    for (p = &ngx_backtrace_si_codes[0]; p->signo != -1; p++) {
-        if (p->signo == signo) {
-            return (p->si_code == si_code) ? p->si_code_desc : "Unknown reason";
-        }
-    }
-
-    return NULL;
-}
 
 static ngx_command_t ngx_backtrace_commands[] = {
 
@@ -92,21 +99,23 @@ static ngx_command_t ngx_backtrace_commands[] = {
       0,
       NULL },
 
-    { ngx_string("backtrace_max_stack_size"),
+    { ngx_string("backtrace_format"),
       NGX_MAIN_CONF|NGX_DIRECT_CONF|NGX_CONF_TAKE1,
-      ngx_conf_set_num_slot,
+      ngx_conf_set_enum_slot,
       0,
-      offsetof(ngx_backtrace_conf_t, max_stack_size),
-      NULL },
+      offsetof(ngx_backtrace_conf_t, format),
+      &ngx_backtrace_format },
 
       ngx_null_command
 };
 
+
 static ngx_core_module_t  ngx_backtrace_module_ctx = {
     ngx_string("backtrace"),
     ngx_backtrace_create_conf,
-    NULL
+    ngx_backtrace_init_conf
 };
+
 
 ngx_module_t  ngx_backtrace_module = {
     NGX_MODULE_V1,
@@ -123,9 +132,30 @@ ngx_module_t  ngx_backtrace_module = {
     NGX_MODULE_V1_PADDING
 };
 
+
+const char *
+ngx_si_code2desc(int signo, int si_code)
+{
+    sig_action_map_t *p;
+
+    for (p = &ngx_backtrace_si_codes[0]; p->signo != -1; p++) {
+        if (p->signo == signo) {
+
+            if (p->si_code == si_code) {
+                return p->si_code_desc;
+            }
+
+            return "Unknown reason";
+        }
+    }
+
+    return NULL;
+}
+
+
 #if defined(nginx_version) && nginx_version >= 1005002
 static ngx_log_t *
-ngx_log_create (ngx_cycle_t *cycle, ngx_str_t *name)
+ngx_log_create(ngx_cycle_t *cycle, ngx_str_t *name)
 {
     ngx_log_t  *log;
 
@@ -143,10 +173,13 @@ ngx_log_create (ngx_cycle_t *cycle, ngx_str_t *name)
 }
 #endif
 
-const char *ngx_backtrace_get_proc_exe (pid_t pid) {
-    char proc_pid[64];
-    static char proc_buf[64];
-    
+
+const char *
+ngx_backtrace_get_proc_exe(pid_t pid)
+{
+    char         proc_pid[64];
+    static char  proc_buf[64];
+
     snprintf(proc_pid, sizeof(proc_buf), "/proc/%d/exe", pid);
 
     if (readlink(proc_pid, proc_buf, sizeof(proc_buf)-1) < 1) {
@@ -157,8 +190,9 @@ const char *ngx_backtrace_get_proc_exe (pid_t pid) {
     return (const char *)&proc_buf[0];
 }
 
+
 static ngx_int_t
-ngx_init_error_signals (ngx_log_t *log)
+ngx_init_error_signals(ngx_log_t *log)
 {
     ngx_signal_t      *sig;
     struct sigaction   sa;
@@ -179,8 +213,10 @@ ngx_init_error_signals (ngx_log_t *log)
     return NGX_OK;
 }
 
+
 static void
-ngx_error_signal_handler (int signo, siginfo_t *info, void *ptr) {
+ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
+{
     ngx_log_t            *log;
     ngx_signal_t         *sig;
     struct sigaction      sa;
@@ -188,11 +224,13 @@ ngx_error_signal_handler (int signo, siginfo_t *info, void *ptr) {
     int                   nptrs;
     int                   ret;
     int                   fd;
+    char                  time_str[26];
     time_t                crash_time;
     const char           *si_code_reason;
     const char           *proc_exe;
     unw_cursor_t          cursor; 
     unw_context_t         uc;
+    int                   first_frame;
 
     bcf = (ngx_backtrace_conf_t *) ngx_get_conf(ngx_cycle->conf_ctx,
                                                 ngx_backtrace_module);
@@ -204,7 +242,7 @@ ngx_error_signal_handler (int signo, siginfo_t *info, void *ptr) {
             break;
         }
     }
-    
+
     if (sig == 0) {
         ngx_log_error(NGX_LOG_ERR, log, 0,
             "ngx_backtrace: Wrong signal received from Kernel! Weird!!");
@@ -213,15 +251,107 @@ ngx_error_signal_handler (int signo, siginfo_t *info, void *ptr) {
 
     ngx_log_error(NGX_LOG_ERR, log, 0,
                     "ngx_backtrace: Got signal %d (%s), Saving the stacktrace in %s", 
-                    signo, sig->signame, (char *)log->file->name.data
+                    signo, sig->signame, (char *) log->file->name.data
     );
 
     fd = log->file->fd;
     if (fcntl(fd, F_GETFL) < 0) {
         ngx_log_error(NGX_LOG_ERR, log, 0,
                     "ngx_backtrace: We can't write into the file %s, exiting.",
-                    (char *)log->file->name.data
+                    (char *) log->file->name.data
         );
+        goto bye;
+    }
+
+    if (bcf->format == NGX_BACKTRACE_FORMAT_JSON) {
+        first_frame = 1;
+
+        dprintf(fd, "{\"signal_number\":%d,\"signal_name\":\"%s\",",
+                signo, sig->signame);
+
+        crash_time = time(NULL);
+        ctime_r(&crash_time, time_str);
+        time_str[24] = '\0';
+        dprintf(fd, "\"time_local\":\"%s\",", time_str);
+        dprintf(fd, "\"faulty_address\":\"%p\",", info->si_addr);
+        dprintf(fd, "\"pid\":%ld,", (long) getpid());
+        dprintf(fd, "\"ppid\":%ld,", (long) getppid());
+
+        proc_exe = ngx_backtrace_get_proc_exe(getpid());
+        dprintf(fd, "\"binary_name\":\"%s\",", proc_exe);
+        dprintf(fd, "\"signal_code\":%d,", info->si_code);
+
+        si_code_reason = ngx_si_code2desc(signo, info->si_code);
+        dprintf(fd, "\"signal_reason\":\"%s\",", si_code_reason);
+
+        dprintf(fd, "\"stack_trace\":[");
+
+        ngx_memzero(&sa, sizeof(struct sigaction));
+        sa.sa_handler = SIG_DFL;
+        sigemptyset(&sa.sa_mask);
+        if (sigaction(signo, &sa, NULL) == -1) {
+            ngx_log_error(NGX_LOG_ERR, log, ngx_errno,
+                        "ngx_backtrace: sigaction(%s) failed", sig->signame);
+        }
+
+        ret = unw_getcontext(&uc);
+        if (ret != UNW_ESUCCESS) {
+            ngx_log_error(NGX_LOG_ERR, log, ngx_errno,
+                          "ngx_backtrace: problems with unw_getcontext() "
+                          "ret=%d", ret);
+            goto invalid;
+        }
+
+        ret = unw_init_local(&cursor, &uc);
+        if (ret != 0) {
+            dprintf(fd, "{\"error\":\"problems with unw_init_local(), "
+                    "ret=%d\"}", ret);
+            goto invalid;
+        }
+
+        for (nptrs = 0; unw_step(&cursor) > 0; nptrs++) {
+            char fname[128] = { '\0', };
+            unw_word_t ip, sp, offp;
+
+            unw_get_proc_name(&cursor, fname, sizeof(fname), &offp);
+
+            ret = unw_get_reg(&cursor, UNW_REG_IP, &ip);
+            if (ret != 0) {
+                dprintf(fd, "{\"error\":\"problems with "
+                        "unw_get_reg(UNW_REG_IP), ret=%d\"}]}", ret);
+                goto invalid;
+            }
+
+            ret = unw_get_reg(&cursor, UNW_REG_SP, &sp);
+            if (ret != 0) {
+                dprintf(fd, "{\"error\":\"problems with "
+                        "unw_get_reg(UNW_REG_SP), ret=%d\"}]}", ret);
+                goto invalid;
+            }
+
+            if (!strcmp(fname, "__restore_rt")) {
+                continue;
+            }
+
+            if (!strcmp(fname, "__libc_start_main")) {
+                break;
+            }
+
+            if (!first_frame) {
+                dprintf(fd, ",");
+            }
+
+            dprintf(fd, "{\"frame\":%d,\"ip\":\"0x" REGFORMAT "\","
+                    "\"function\":\"%s\",\"sp\":\"0x" REGFORMAT "\"}",
+                    nptrs, (long) ip, fname[0] ? fname : "??", (long) sp);
+
+            first_frame = 0;
+        }
+
+        dprintf(fd, "]}");
+
+        fsync(fd);
+
         goto bye;
     }
 
@@ -232,8 +362,8 @@ ngx_error_signal_handler (int signo, siginfo_t *info, void *ptr) {
     crash_time = time(NULL);
     dprintf(fd, " Date: %s", ctime(&crash_time));
     dprintf(fd, " Faulty address: %p\n", info->si_addr);
-    dprintf(fd, " PID: %ld\n", (long)getpid());
-    dprintf(fd, " PPID: %ld\n", (long)getppid());
+    dprintf(fd, " PID: %ld\n", (long) getpid());
+    dprintf(fd, " PPID: %ld\n", (long) getppid());
 
     proc_exe = ngx_backtrace_get_proc_exe(getpid());
     dprintf(fd, " Binary name: %s\n", proc_exe);
@@ -251,10 +381,6 @@ ngx_error_signal_handler (int signo, siginfo_t *info, void *ptr) {
                       "ngx_backtrace: sigaction(%s) failed", sig->signame);
     }
 
-    if (bcf->max_stack_size == NGX_CONF_UNSET) {
-        bcf->max_stack_size = NGX_BACKTRACE_DEFAULT_STACK_MAX_SIZE;
-    }
-
     dprintf(fd, "Stack trace:\n");
 
     ret = unw_getcontext(&uc);
@@ -264,9 +390,9 @@ ngx_error_signal_handler (int signo, siginfo_t *info, void *ptr) {
         goto invalid;
     }
 
-    ret = unw_init_local (&cursor, &uc);
+    ret = unw_init_local(&cursor, &uc);
     if (ret != 0) {
-        dprintf(fd, "Problems with unw_init_local() failed: ret=%d\n", ret);
+        dprintf(fd, "problems with unw_init_local() failed: ret=%d\n", ret);
         goto invalid;
     }
 
@@ -274,22 +400,27 @@ ngx_error_signal_handler (int signo, siginfo_t *info, void *ptr) {
         char fname[128] = { '\0', };
         unw_word_t ip, sp, offp;
 
-        unw_get_proc_name (&cursor, fname, sizeof(fname), &offp);
+        unw_get_proc_name(&cursor, fname, sizeof(fname), &offp);
 
-        ret = unw_get_reg (&cursor, UNW_REG_IP, &ip);
+        ret = unw_get_reg(&cursor, UNW_REG_IP, &ip);
         if (ret != 0) {
-            dprintf(fd, "Problems with unw_get_reg(UNW_REG_IP) failed: ret=%d\n", ret);
+            dprintf(fd, "problems with unw_get_reg(UNW_REG_IP) failed: ret=%d\n", ret);
             goto invalid;
         }
 
-        ret = unw_get_reg (&cursor, UNW_REG_SP, &sp);
+        ret = unw_get_reg(&cursor, UNW_REG_SP, &sp);
         if (ret != 0) {
-            dprintf(fd, "Problems with unw_get_reg(UNW_REG_SP) failed: ret=%d\n", ret);
+            dprintf(fd, "problems with unw_get_reg(UNW_REG_SP) failed: ret=%d\n", ret);
             goto invalid;
         }
 
-        if (!strcmp(fname, "__restore_rt")) continue;
-        if (!strcmp(fname, "__libc_start_main")) break;
+        if (!strcmp(fname, "__restore_rt")) {
+            continue;
+        }
+
+        if (!strcmp(fname, "__libc_start_main")) {
+            break;
+        }
 
         dprintf(fd, "\t#%02d: 0x"REGFORMAT" in %s(), sp = 0x"REGFORMAT"\n",
                 nptrs, (long) ip, fname[0] ? fname : "??", (long) sp);
@@ -302,10 +433,12 @@ ngx_error_signal_handler (int signo, siginfo_t *info, void *ptr) {
 bye:
 
     return;
+
 invalid:
 
     kill(ngx_getpid(), signo);
 }
+
 
 static char *
 ngx_backtrace_files(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
@@ -338,15 +471,18 @@ ngx_backtrace_files(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
+
 static ngx_int_t
 ngx_backtrace_init_module(ngx_cycle_t *cycle)
 {
     ngx_backtrace_conf_t *bcf;
 
-    bcf = (ngx_backtrace_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_backtrace_module);
+    bcf = (ngx_backtrace_conf_t *) ngx_get_conf(cycle->conf_ctx,
+                                                ngx_backtrace_module);
 
     if (!bcf->log) {
-        ngx_log_debug0(NGX_LOG_DEBUG_CORE, cycle->log, 0, "ngx_backtrace: the module is not in use");
+        ngx_log_debug0(NGX_LOG_DEBUG_CORE, cycle->log, 0,
+                       "ngx_backtrace: no log file specified");
         return NGX_OK;
     }
 
@@ -356,6 +492,7 @@ ngx_backtrace_init_module(ngx_cycle_t *cycle)
 
     return NGX_OK;
 }
+
 
 static void *
 ngx_backtrace_create_conf(ngx_cycle_t *cycle)
@@ -367,7 +504,18 @@ ngx_backtrace_create_conf(ngx_cycle_t *cycle)
         return NULL;
     }
 
-    bcf->max_stack_size = NGX_CONF_UNSET;
+    bcf->format = NGX_CONF_UNSET;
 
     return bcf;
+}
+
+
+static char *
+ngx_backtrace_init_conf(ngx_cycle_t *cycle, void *conf)
+{
+    ngx_backtrace_conf_t *bcf = conf;
+
+    ngx_conf_init_value(bcf->format, NGX_BACKTRACE_FORMAT_PLAIN);
+
+    return NGX_CONF_OK;
 }

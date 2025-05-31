@@ -39,14 +39,14 @@ backtrace_log
 Specify the log file name of backtrace.
 backtrace_log /path/to/backtrace.log
 
-backtrace_max_stack_size
-------------------------
+backtrace_format 
+-----------------
 
-**Syntax**: *backtrace_max_stack_size size*
-**Default**: *backtrace_max_stack_size 30*
+**Syntax**: *backtrace_format plain | json*
+**Default**: *backtrace_format plain*
 **Context**: *main*
 
-Specify the maximum stack depth for backtrace
+Specify the log format of backtrace.
 
 Backtrace Sample
 ==========
