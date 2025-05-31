@@ -32,8 +32,8 @@
 
 
 static ngx_conf_enum_t  ngx_backtrace_format[] = {
-    { ngx_string("plain"), NGX_BACKTRACE_LOG_FORMAT_PLAIN },
-    { ngx_string("json"),  NGX_BACKTRACE_LOG_FORMAT_JSON },
+    { ngx_string("plain"), NGX_BACKTRACE_FORMAT_PLAIN },
+    { ngx_string("json"),  NGX_BACKTRACE_FORMAT_JSON },
     { ngx_null_string, 0 }
 };
 
@@ -59,6 +59,7 @@ typedef struct {
 
 typedef struct {
     ngx_log_t  *log;
+    ngx_uint_t  format;
 } ngx_backtrace_conf_t;
 
 
