@@ -505,7 +505,7 @@ ngx_backtrace_create_conf(ngx_cycle_t *cycle)
         return NULL;
     }
 
-    bcf->format = NGX_CONF_UNSET;
+    bcf->format = NGX_CONF_UNSET_UINT;
 
     return bcf;
 }
@@ -516,7 +516,7 @@ ngx_backtrace_init_conf(ngx_cycle_t *cycle, void *conf)
 {
     ngx_backtrace_conf_t *bcf = conf;
 
-    ngx_conf_init_value(bcf->format, NGX_BACKTRACE_FORMAT_PLAIN);
+    ngx_conf_init_uint_value(bcf->format, NGX_BACKTRACE_FORMAT_PLAIN);
 
     return NGX_CONF_OK;
 }
