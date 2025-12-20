@@ -23,6 +23,11 @@
 # define REGFORMAT "%08x"
 #else
 # define SIGSEGV_STACK_GENERIC
+# if __WORDSIZE == 64
+#  define REGFORMAT "%lx"
+# else
+#  define REGFORMAT "%x"
+# endif
 # define REGFORMAT "%x"
 #endif
 
