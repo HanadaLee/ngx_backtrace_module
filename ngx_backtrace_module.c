@@ -28,7 +28,6 @@
 # else
 #  define REGFORMAT "%x"
 # endif
-# define REGFORMAT "%x"
 #endif
 
 
