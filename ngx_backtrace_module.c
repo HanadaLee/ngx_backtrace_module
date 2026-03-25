@@ -353,7 +353,7 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
             first_frame = 0;
         }
 
-        dprintf(fd, "]}");
+        dprintf(fd, "]}\n");
 
         fsync(fd);
 
