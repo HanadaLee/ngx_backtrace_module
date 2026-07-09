@@ -32,21 +32,17 @@ Directives
 backtrace_log
 -------------
 
-**Syntax**: *backtrace_log log_path*
-**Default**: *backtrace_log error.log*
+**Syntax**: *backtrace_log off | file [format=json|default]*
+**Default**: *backtrace_log off;*
 **Context**: *main*
 
-Specify the log file name of backtrace.
-backtrace_log /path/to/backtrace.log
+Specify the log file name and optional log format of backtrace.
 
-backtrace_format 
------------------
-
-**Syntax**: *backtrace_format plain | json*
-**Default**: *backtrace_format plain*
-**Context**: *main*
-
-Specify the log format of backtrace.
+```
+backtrace_log off;
+backtrace_log /path/to/backtrace.log;
+backtrace_log /path/to/backtrace.log format=json;
+```
 
 Backtrace Sample
 ==========
@@ -79,4 +75,3 @@ Stack trace:
 End of stack trace.
 
 ```
-

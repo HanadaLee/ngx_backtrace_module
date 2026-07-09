@@ -31,18 +31,11 @@
 #endif
 
 
-#define NGX_BACKTRACE_FORMAT_PLAIN   0
+#define NGX_BACKTRACE_FORMAT_DEFAULT 0
 #define NGX_BACKTRACE_FORMAT_JSON    1
 
 
-static ngx_conf_enum_t  ngx_backtrace_format[] = {
-    { ngx_string("plain"), NGX_BACKTRACE_FORMAT_PLAIN },
-    { ngx_string("json"),  NGX_BACKTRACE_FORMAT_JSON },
-    { ngx_null_string, 0 }
-};
-
-
-static char *ngx_backtrace_files(ngx_conf_t *cf, ngx_command_t *cmd,
+static char *ngx_backtrace_log(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
 static void ngx_error_signal_handler(int signo, siginfo_t *info, void *secret);
 static ngx_int_t ngx_backtrace_init_module(ngx_cycle_t *cycle);
@@ -98,18 +91,11 @@ static sig_action_map_t ngx_backtrace_si_codes[] = {
 static ngx_command_t ngx_backtrace_commands[] = {
 
     { ngx_string("backtrace_log"),
-      NGX_MAIN_CONF|NGX_DIRECT_CONF|NGX_CONF_TAKE1,
-      ngx_backtrace_files,
+      NGX_MAIN_CONF|NGX_DIRECT_CONF|NGX_CONF_TAKE12,
+      ngx_backtrace_log,
       0,
       0,
       NULL },
-
-    { ngx_string("backtrace_format"),
-      NGX_MAIN_CONF|NGX_DIRECT_CONF|NGX_CONF_TAKE1,
-      ngx_conf_set_enum_slot,
-      0,
-      offsetof(ngx_backtrace_conf_t, format),
-      &ngx_backtrace_format },
 
       ngx_null_command
 };
@@ -446,17 +432,70 @@ invalid:
 
 
 static char *
-ngx_backtrace_files(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_backtrace_log(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-    ngx_str_t             file, *value;
-    ngx_log_t            *log;
-    ngx_backtrace_conf_t *bcf;
+    ngx_str_t              file, format, *value;
+    ngx_log_t             *log;
+    ngx_backtrace_conf_t  *bcf;
+    ngx_uint_t             i, file_set;
 
     bcf = (ngx_backtrace_conf_t *) ngx_get_conf(cf->cycle->conf_ctx,
                                                 ngx_backtrace_module);
 
+    if (bcf->log != NGX_CONF_UNSET_PTR) {
+        return "is duplicate";
+    }
+
     value = cf->args->elts;
-    file = value[1];
+
+    file_set = 0;
+
+    for (i = 1; i < cf->args->nelts; i++) {
+
+        if (value[i].len == sizeof("off") - 1
+            && ngx_strncmp(value[i].data, "off", sizeof("off") - 1) == 0)
+        {
+            bcf->log = NULL;
+            return NGX_CONF_OK;
+        }
+
+        if (value[i].len >= sizeof("format=") - 1
+            && ngx_strncmp(value[i].data, "format=",
+                           sizeof("format=") - 1) == 0)
+        {
+            format.data = value[i].data + sizeof("format=") - 1;
+            format.len = value[i].len - (sizeof("format=") - 1);
+
+            if (format.len == sizeof("json") - 1
+                && ngx_strncmp(format.data, "json", format.len) == 0)
+            {
+                bcf->format = NGX_BACKTRACE_FORMAT_JSON;
+                continue;
+            }
+
+            if (format.len == sizeof("default") - 1
+                && ngx_strncmp(format.data, "default", format.len) == 0)
+            {
+                bcf->format = NGX_BACKTRACE_FORMAT_DEFAULT;
+                continue;
+            }
+
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                               "invalid format parameter \"%V\"",
+                               &value[i], &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+
+        file = value[i];
+        file_set = 1;
+    }
+
+    if (!file_set) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "\"%V\" requires log path",
+                           &cmd->name);
+        return NGX_CONF_ERROR;
+    }
 
     ngx_log_debug1(NGX_LOG_DEBUG_CORE, ngx_cycle->log, 0,
                 "ngx_backtrace: Initializing the module saving in %s",
@@ -510,6 +549,7 @@ ngx_backtrace_create_conf(ngx_cycle_t *cycle)
     }
 
     bcf->format = NGX_CONF_UNSET_UINT;
+    bcf->log = NGX_CONF_UNSET_PTR;
 
     return bcf;
 }
@@ -520,7 +560,8 @@ ngx_backtrace_init_conf(ngx_cycle_t *cycle, void *conf)
 {
     ngx_backtrace_conf_t *bcf = conf;
 
-    ngx_conf_init_uint_value(bcf->format, NGX_BACKTRACE_FORMAT_PLAIN);
+    ngx_conf_init_uint_value(bcf->format, NGX_BACKTRACE_FORMAT_DEFAULT);
+    ngx_conf_init_ptr_value(bcf->log, NULL);
 
     return NGX_CONF_OK;
 }
