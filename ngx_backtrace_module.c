@@ -219,7 +219,7 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
     time_t                crash_time;
     const char           *si_code_reason;
     const char           *proc_exe;
-    unw_cursor_t          cursor; 
+    unw_cursor_t          cursor;
     unw_context_t         uc;
     int                   first_frame;
 
@@ -236,21 +236,20 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
 
     if (sig == 0) {
         ngx_log_error(NGX_LOG_ERR, log, 0,
-            "ngx_backtrace: Wrong signal received from Kernel! Weird!!");
+                      "ngx_backtrace: wrong signal received from kernel");
         return;
     }
 
     ngx_log_error(NGX_LOG_ERR, log, 0,
-                    "ngx_backtrace: Got signal %d (%s), Saving the stacktrace in %s", 
-                    signo, sig->signame, (char *) log->file->name.data
-    );
+                  "ngx_backtrace: got signal %d (%s), saving the stacktrace "
+                  "in %s",
+                  signo, sig->signame, (char *) log->file->name.data);
 
     fd = log->file->fd;
     if (fcntl(fd, F_GETFL) < 0) {
         ngx_log_error(NGX_LOG_ERR, log, 0,
-                    "ngx_backtrace: We can't write into the file %s, exiting.",
-                    (char *) log->file->name.data
-        );
+                      "ngx_backtrace: cannot write into the file %s, exiting",
+                      (char *) log->file->name.data);
         goto bye;
     }
 
@@ -282,7 +281,8 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
         sigemptyset(&sa.sa_mask);
         if (sigaction(signo, &sa, NULL) == -1) {
             ngx_log_error(NGX_LOG_ERR, log, ngx_errno,
-                        "ngx_backtrace: sigaction(%s) failed", sig->signame);
+                          "ngx_backtrace: sigaction(%s) failed",
+                          sig->signame);
         }
 
         ret = unw_getcontext(&uc);
@@ -347,7 +347,8 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
     }
 
     dprintf(fd, "+-------------------------------------------------------+\n");
-    dprintf(fd, "| ngx_backtrace: Received signal %d (%s)\n", signo, sig->signame);
+    dprintf(fd, "| ngx_backtrace: Received signal %d (%s)\n",
+            signo, sig->signame);
     dprintf(fd, "+-------------------------------------------------------+\n");
 
     crash_time = time(NULL);
@@ -377,7 +378,8 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
     ret = unw_getcontext(&uc);
     if (ret != UNW_ESUCCESS) {
         ngx_log_error(NGX_LOG_ERR, log, ngx_errno,
-                      "ngx_backtrace: Problems with unw_getcontext() ret=%d", ret);
+                      "ngx_backtrace: Problems with unw_getcontext() ret=%d",
+                      ret);
         goto invalid;
     }
 
@@ -395,13 +397,17 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
 
         ret = unw_get_reg(&cursor, UNW_REG_IP, &ip);
         if (ret != 0) {
-            dprintf(fd, "problems with unw_get_reg(UNW_REG_IP) failed: ret=%d\n", ret);
+            dprintf(fd,
+                    "problems with unw_get_reg(UNW_REG_IP) failed: ret=%d\n",
+                    ret);
             goto invalid;
         }
 
         ret = unw_get_reg(&cursor, UNW_REG_SP, &sp);
         if (ret != 0) {
-            dprintf(fd, "problems with unw_get_reg(UNW_REG_SP) failed: ret=%d\n", ret);
+            dprintf(fd,
+                    "problems with unw_get_reg(UNW_REG_SP) failed: ret=%d\n",
+                    ret);
             goto invalid;
         }
 
@@ -498,8 +504,8 @@ ngx_backtrace_log(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     }
 
     ngx_log_debug1(NGX_LOG_DEBUG_CORE, ngx_cycle->log, 0,
-                "ngx_backtrace: Initializing the module saving in %s",
-                file.data);
+                   "ngx_backtrace: initializing the module saving in %s",
+                   file.data);
 
     if (ngx_conf_full_name(cf->cycle, &file, 1) != NGX_OK) {
         return NGX_CONF_ERROR;
