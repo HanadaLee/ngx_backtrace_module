@@ -84,7 +84,7 @@ static sig_action_map_t ngx_backtrace_si_codes[] = {
     { SIGSEGV, SEGV_MAPERR, "SEGV_MAPERR (address not mapped to object)" },
     { SIGSEGV, SEGV_ACCERR,
       "SEGV_ACCERR (invalid permissions for mapped object)" },
-    { SIGSEGV, -1,          "Unknown reason" }
+    { -1,      -1,          NULL }
 };
 
 
@@ -127,20 +127,15 @@ ngx_module_t  ngx_backtrace_module = {
 const char *
 ngx_si_code2desc(int signo, int si_code)
 {
-    sig_action_map_t *p;
+    sig_action_map_t  *p;
 
     for (p = &ngx_backtrace_si_codes[0]; p->signo != -1; p++) {
-        if (p->signo == signo) {
-
-            if (p->si_code == si_code) {
-                return p->si_code_desc;
-            }
-
-            return "Unknown reason";
+        if (p->signo == signo && p->si_code == si_code) {
+            return p->si_code_desc;
         }
     }
 
-    return NULL;
+    return "Unknown reason";
 }
 
 
