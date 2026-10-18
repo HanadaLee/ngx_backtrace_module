@@ -7,6 +7,8 @@
 use warnings;
 use strict;
 
+use File::Copy qw(copy);
+use File::Path qw(make_path);
 use JSON::PP qw(decode_json);
 use Test::More;
 
@@ -19,7 +21,13 @@ use Test::Nginx;
 select STDERR; $| = 1;
 select STDOUT; $| = 1;
 
-my $t = Test::Nginx->new()->has(qw/http ngx_backtrace_module/)->plan(21);
+my $t = Test::Nginx->new()->has(qw/http ngx_backtrace_module/)->plan(23);
+
+my $bin_dir = $t->testdir() . '/' . ('long-install-prefix-' x 8);
+make_path($bin_dir);
+copy($Test::Nginx::NGINX, "$bin_dir/nginx") or die "copy nginx: $!";
+chmod 0755, "$bin_dir/nginx" or die "chmod nginx: $!";
+local $Test::Nginx::NGINX = "$bin_dir/nginx";
 
 sub write_config {
 	my ($t, $file, $format) = @_;
@@ -88,6 +96,8 @@ write_config($t, 'backtrace.log', 'default');
 $t->run();
 
 my ($worker, $master) = worker_pid($t);
+my $exe = readlink("/proc/$worker/exe") or die "readlink worker: $!";
+cmp_ok(length($exe), '>', 63, 'binary path exceeds the old buffer');
 
 is(kill('ABRT', $worker), 1, 'default format signal delivered');
 
@@ -98,6 +108,8 @@ like($log, qr/Received signal 6 \(SIGABRT\)/,
 like($log, qr/^Stack trace:$/m, 'default format starts stack trace');
 like($log, qr/^End of stack trace\.$/m, 'default format ends stack trace');
 like($log, qr/^ PID: \Q$worker\E$/m, 'default format records worker pid');
+like($log, qr/^ Binary name: \Q$exe\E$/m,
+	'default format records complete binary path');
 like($log, qr/^\s+#[0-9]+: .* in .*\(\), sp = /m,
 	'default format records stack frame');
 like(http_get('/'), qr/^HTTP\/1\.1 200 .*\x0d\x0a\x0d\x0aalive$/s,
@@ -109,6 +121,7 @@ write_config($t, 'backtrace.json.log', 'json');
 $t->run();
 
 ($worker, $master) = worker_pid($t);
+$exe = readlink("/proc/$worker/exe") or die "readlink worker: $!";
 
 is(kill('ABRT', $worker), 1, 'JSON format signal delivered');
 
@@ -128,7 +141,7 @@ is($data->{signal_reason}, 'Unknown reason',
 	'JSON records fallback signal reason');
 is($data->{pid}, 0 + $worker, 'JSON records worker pid');
 is($data->{ppid}, 0 + $master, 'JSON records master pid');
-like($data->{binary_name} // '', qr{/nginx$}, 'JSON records binary path');
+is($data->{binary_name}, $exe, 'JSON records complete binary path');
 like($data->{time_local} // '', qr/^[A-Z][a-z]{2} /,
 	'JSON records local time');
 is(ref($data->{stack_trace}), 'ARRAY', 'JSON records stack trace array');

@@ -164,16 +164,24 @@ const char *
 ngx_backtrace_get_proc_exe(pid_t pid)
 {
     char         proc_pid[64];
-    static char  proc_buf[64];
+    ssize_t      n;
+    static char  proc_buf[NGX_MAX_PATH];
 
-    snprintf(proc_pid, sizeof(proc_buf), "/proc/%d/exe", pid);
+    snprintf(proc_pid, sizeof(proc_pid), "/proc/%d/exe", pid);
 
-    if (readlink(proc_pid, proc_buf, sizeof(proc_buf)-1) < 1) {
+    n = readlink(proc_pid, proc_buf, sizeof(proc_buf));
+    if (n < 1) {
         perror("readlink");
         return NULL;
     }
 
-    return (const char *)&proc_buf[0];
+    if ((size_t) n == sizeof(proc_buf)) {
+        return NULL;
+    }
+
+    proc_buf[n] = '\0';
+
+    return proc_buf;
 }
 
 
@@ -263,7 +271,7 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
         dprintf(fd, "\"ppid\":%ld,", (long) getppid());
 
         proc_exe = ngx_backtrace_get_proc_exe(getpid());
-        dprintf(fd, "\"binary_name\":\"%s\",", proc_exe);
+        dprintf(fd, "\"binary_name\":\"%s\",", proc_exe ? proc_exe : "unknown");
         dprintf(fd, "\"signal_code\":%d,", info->si_code);
 
         si_code_reason = ngx_si_code2desc(signo, info->si_code);
@@ -353,7 +361,7 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
     dprintf(fd, " PPID: %ld\n", (long) getppid());
 
     proc_exe = ngx_backtrace_get_proc_exe(getpid());
-    dprintf(fd, " Binary name: %s\n", proc_exe);
+    dprintf(fd, " Binary name: %s\n", proc_exe ? proc_exe : "unknown");
     dprintf(fd, " Signal Code: %d\n", info->si_code);
 
     si_code_reason = ngx_si_code2desc(signo, info->si_code);
