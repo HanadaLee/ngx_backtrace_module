@@ -44,6 +44,17 @@ backtrace_log /path/to/backtrace.log;
 backtrace_log /path/to/backtrace.log format=json;
 ```
 
+backtrace_max_stack_size
+-----------------------
+
+**Syntax**: *backtrace_max_stack_size number*
+**Default**: *backtrace_max_stack_size 30;*
+**Context**: *main*
+
+Limit the number of stack frames in both text and JSON traces. The value must
+be at least 1. The signal handler uses an alternate stack and starts from the
+faulting context on x86_64 and aarch64, including after a stack overflow.
+
 Backtrace Sample
 ==========
 

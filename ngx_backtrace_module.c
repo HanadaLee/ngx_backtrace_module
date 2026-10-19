@@ -21,6 +21,7 @@
 #define NGX_BACKTRACE_FORMAT_DEFAULT 0
 #define NGX_BACKTRACE_FORMAT_JSON    1
 #define NGX_BACKTRACE_ALTSTACK_SIZE  (64 * 1024)
+#define NGX_BACKTRACE_DEFAULT_STACK_MAX_SIZE  30
 
 
 static char  ngx_backtrace_altstack[NGX_BACKTRACE_ALTSTACK_SIZE];
@@ -48,6 +49,7 @@ typedef struct {
 typedef struct {
     ngx_log_t  *log;
     ngx_uint_t  format;
+    ngx_int_t   max_stack_size;
 } ngx_backtrace_conf_t;
 
 
@@ -79,6 +81,11 @@ static sig_action_map_t ngx_backtrace_si_codes[] = {
 };
 
 
+static ngx_conf_num_bounds_t  ngx_backtrace_stack_bounds = {
+    ngx_conf_check_num_bounds, 1, -1
+};
+
+
 static ngx_command_t ngx_backtrace_commands[] = {
 
     { ngx_string("backtrace_log"),
@@ -87,6 +94,13 @@ static ngx_command_t ngx_backtrace_commands[] = {
       0,
       0,
       NULL },
+
+    { ngx_string("backtrace_max_stack_size"),
+      NGX_MAIN_CONF|NGX_DIRECT_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_num_slot,
+      0,
+      offsetof(ngx_backtrace_conf_t, max_stack_size),
+      &ngx_backtrace_stack_bounds },
 
       ngx_null_command
 };
@@ -361,7 +375,7 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
 
             first_frame = 0;
             nptrs++;
-        } while (unw_step(&cursor) > 0);
+        } while (nptrs < bcf->max_stack_size && unw_step(&cursor) > 0);
 
         dprintf(fd, "]}\n");
 
@@ -454,7 +468,7 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
                 nptrs, (unsigned long) ip, fname[0] ? fname : "??",
                 (unsigned long) sp);
         nptrs++;
-    } while (unw_step(&cursor) > 0);
+    } while (nptrs < bcf->max_stack_size && unw_step(&cursor) > 0);
 
     dprintf(fd, "End of stack trace.\n\n");
 
@@ -594,6 +608,7 @@ ngx_backtrace_create_conf(ngx_cycle_t *cycle)
     }
 
     bcf->format = NGX_CONF_UNSET_UINT;
+    bcf->max_stack_size = NGX_CONF_UNSET;
     bcf->log = NGX_CONF_UNSET_PTR;
 
     return bcf;
@@ -607,6 +622,8 @@ ngx_backtrace_init_conf(ngx_cycle_t *cycle, void *conf)
 
     ngx_conf_init_uint_value(bcf->format, NGX_BACKTRACE_FORMAT_DEFAULT);
     ngx_conf_init_ptr_value(bcf->log, NULL);
+    ngx_conf_init_value(bcf->max_stack_size,
+                        NGX_BACKTRACE_DEFAULT_STACK_MAX_SIZE);
 
     return NGX_CONF_OK;
 }
