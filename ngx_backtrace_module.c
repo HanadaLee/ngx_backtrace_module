@@ -150,6 +150,8 @@ ngx_log_create(ngx_cycle_t *cycle, ngx_str_t *name)
         return NULL;
     }
 
+    log->log_level = NGX_LOG_ERR;
+
     log->file = ngx_conf_open_file(cycle, name);
     if (log->file == NULL) {
         return NULL;
@@ -171,7 +173,6 @@ ngx_backtrace_get_proc_exe(pid_t pid)
 
     n = readlink(proc_pid, proc_buf, sizeof(proc_buf));
     if (n < 1) {
-        perror("readlink");
         return NULL;
     }
 
@@ -237,20 +238,28 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
         }
     }
 
-    if (sig == 0) {
-        ngx_log_error(NGX_LOG_ERR, log, 0,
+    if (sig->signo == 0) {
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                       "ngx_backtrace: wrong signal received from kernel");
         return;
     }
 
-    ngx_log_error(NGX_LOG_ERR, log, 0,
+    ngx_memzero(&sa, sizeof(struct sigaction));
+    sa.sa_handler = SIG_DFL;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(signo, &sa, NULL) == -1) {
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, ngx_errno,
+                      "ngx_backtrace: sigaction(%s) failed", sig->signame);
+    }
+
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                   "ngx_backtrace: got signal %d (%s), saving the stacktrace "
                   "in %s",
                   signo, sig->signame, (char *) log->file->name.data);
 
     fd = log->file->fd;
     if (fcntl(fd, F_GETFL) < 0) {
-        ngx_log_error(NGX_LOG_ERR, log, 0,
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                       "ngx_backtrace: cannot write into the file %s, exiting",
                       (char *) log->file->name.data);
         goto bye;
@@ -279,18 +288,9 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
 
         dprintf(fd, "\"stack_trace\":[");
 
-        ngx_memzero(&sa, sizeof(struct sigaction));
-        sa.sa_handler = SIG_DFL;
-        sigemptyset(&sa.sa_mask);
-        if (sigaction(signo, &sa, NULL) == -1) {
-            ngx_log_error(NGX_LOG_ERR, log, ngx_errno,
-                          "ngx_backtrace: sigaction(%s) failed",
-                          sig->signame);
-        }
-
         ret = unw_getcontext(&uc);
         if (ret != UNW_ESUCCESS) {
-            ngx_log_error(NGX_LOG_ERR, log, ngx_errno,
+            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, ngx_errno,
                           "ngx_backtrace: problems with unw_getcontext() "
                           "ret=%d", ret);
             goto invalid;
@@ -368,19 +368,11 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
     dprintf(fd, " Signal Reason: %s\n", si_code_reason);
     dprintf(fd, "+-------------------------------------------------------+\n");
 
-    ngx_memzero(&sa, sizeof(struct sigaction));
-    sa.sa_handler = SIG_DFL;
-    sigemptyset(&sa.sa_mask);
-    if (sigaction(signo, &sa, NULL) == -1) {
-        ngx_log_error(NGX_LOG_ERR, log, ngx_errno,
-                      "ngx_backtrace: sigaction(%s) failed", sig->signame);
-    }
-
     dprintf(fd, "Stack trace:\n");
 
     ret = unw_getcontext(&uc);
     if (ret != UNW_ESUCCESS) {
-        ngx_log_error(NGX_LOG_ERR, log, ngx_errno,
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, ngx_errno,
                       "ngx_backtrace: Problems with unw_getcontext() ret=%d",
                       ret);
         goto invalid;
