@@ -25,6 +25,7 @@ configure_args=(
 configure_args+=(--with-cc-opt=-fno-omit-frame-pointer --with-ld-opt=-rdynamic)
 
 configure_args+=(--add-module="$module_root")
+configure_args+=(--add-module="$module_root/t/lib/ngx_http_backtrace_test_module")
 
 cd "$nginx_source"
 sh ./configure "${configure_args[@]}"
@@ -55,3 +56,21 @@ if (( ${#tests[@]} == 0 )); then
     exit 1
 fi
 prove -v "${tests[@]}"
+
+# Keep the crash fixture out of the HTTP-free build and production modules.
+cd "$nginx_source"
+sh ./configure --builddir=objs-core --prefix="$nginx_source/core-prefix" \
+    --without-http --with-stream --with-debug --add-module="$module_root"
+make -j"$build_jobs"
+core_output="$TMPDIR/core"
+mkdir -p "$core_output/logs"
+cat > "$core_output/nginx.conf" <<EOF
+pid $core_output/nginx.pid;
+error_log $core_output/error.log notice;
+backtrace_log $core_output/backtrace.log format=json;
+backtrace_max_stack_size 2;
+events {}
+stream {}
+EOF
+"$nginx_source/objs-core/nginx" -t -p "$core_output/" \
+    -c "$core_output/nginx.conf"
