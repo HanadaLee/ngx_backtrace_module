@@ -15,24 +15,15 @@
 #include <libunwind.h> /* from -llibuwind */
 
 
-#if defined(REG_RIP)
-# define SIGSEGV_STACK_IA64
-# define REGFORMAT "%016lx"
-#elif defined(REG_EIP)
-# define SIGSEGV_STACK_X86
-# define REGFORMAT "%08x"
-#else
-# define SIGSEGV_STACK_GENERIC
-# if __WORDSIZE == 64
-#  define REGFORMAT "%lx"
-# else
-#  define REGFORMAT "%x"
-# endif
-#endif
+#define REGFORMAT "%016lx"
 
 
 #define NGX_BACKTRACE_FORMAT_DEFAULT 0
 #define NGX_BACKTRACE_FORMAT_JSON    1
+#define NGX_BACKTRACE_ALTSTACK_SIZE  (64 * 1024)
+
+
+static char  ngx_backtrace_altstack[NGX_BACKTRACE_ALTSTACK_SIZE];
 
 
 static char *ngx_backtrace_log(ngx_conf_t *cf, ngx_command_t *cmd,
@@ -191,11 +182,22 @@ ngx_init_error_signals(ngx_log_t *log)
 {
     ngx_signal_t      *sig;
     struct sigaction   sa;
+    stack_t            ss;
+
+    ss.ss_sp = ngx_backtrace_altstack;
+    ss.ss_size = sizeof(ngx_backtrace_altstack);
+    ss.ss_flags = 0;
+
+    if (sigaltstack(&ss, NULL) == -1) {
+        ngx_log_error(NGX_LOG_EMERG, log, ngx_errno,
+                      "ngx_backtrace: sigaltstack() failed");
+        return NGX_ERROR;
+    }
 
     for (sig = ngx_backtrace_signals; sig->signo != 0; sig++) {
         ngx_memzero(&sa, sizeof(struct sigaction));
         sa.sa_sigaction = sig->handler;
-        sa.sa_flags = SA_SIGINFO;
+        sa.sa_flags = SA_SIGINFO|SA_ONSTACK;
         sigemptyset(&sa.sa_mask);
 
         if (sigaction(sig->signo, &sa, NULL) == -1) {
@@ -265,9 +267,9 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
         goto bye;
     }
 
-    if (bcf->format == NGX_BACKTRACE_FORMAT_JSON) {
-        first_frame = 1;
+    first_frame = 1;
 
+    if (bcf->format == NGX_BACKTRACE_FORMAT_JSON) {
         dprintf(fd, "{\"signal_number\":%d,\"signal_name\":\"%s\",",
                 signo, sig->signame);
 
@@ -288,22 +290,37 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
 
         dprintf(fd, "\"stack_trace\":[");
 
+#if defined(UNW_TARGET_X86_64) || defined(UNW_TARGET_AARCH64)
+        /* Start at the faulting instruction, not the signal handler. */
+        ngx_memcpy(&uc, ptr, ngx_min(sizeof(uc), sizeof(ucontext_t)));
+#else
         ret = unw_getcontext(&uc);
         if (ret != UNW_ESUCCESS) {
-            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, ngx_errno,
-                          "ngx_backtrace: problems with unw_getcontext() "
-                          "ret=%d", ret);
+            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                          "ngx_backtrace: unw_getcontext() failed: %d", ret);
             goto invalid;
         }
+#endif
 
+#if defined(UNW_TARGET_AARCH64)
+        /* The saved PC is exact, including a fault on the first instruction. */
+        ret = unw_init_local2(&cursor, &uc, UNW_INIT_SIGNAL_FRAME);
+#else
         ret = unw_init_local(&cursor, &uc);
+#endif
         if (ret != 0) {
-            dprintf(fd, "{\"error\":\"problems with unw_init_local(), "
-                    "ret=%d\"}", ret);
+            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                          "ngx_backtrace: unw_init_local() failed: %d", ret);
             goto invalid;
         }
 
-        for (nptrs = 0; unw_step(&cursor) > 0; nptrs++) {
+#if !defined(UNW_TARGET_X86_64) && !defined(UNW_TARGET_AARCH64)
+        /* Skip this handler's own frame on other architectures. */
+        unw_step(&cursor);
+#endif
+
+        nptrs = 0;
+        do {
             char fname[128] = { '\0', };
             unw_word_t ip, sp, offp;
 
@@ -311,15 +328,17 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
 
             ret = unw_get_reg(&cursor, UNW_REG_IP, &ip);
             if (ret != 0) {
-                dprintf(fd, "{\"error\":\"problems with "
-                        "unw_get_reg(UNW_REG_IP), ret=%d\"}]}", ret);
+                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                              "ngx_backtrace: unw_get_reg(UNW_REG_IP) "
+                              "failed: %d", ret);
                 goto invalid;
             }
 
             ret = unw_get_reg(&cursor, UNW_REG_SP, &sp);
             if (ret != 0) {
-                dprintf(fd, "{\"error\":\"problems with "
-                        "unw_get_reg(UNW_REG_SP), ret=%d\"}]}", ret);
+                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                              "ngx_backtrace: unw_get_reg(UNW_REG_SP) "
+                              "failed: %d", ret);
                 goto invalid;
             }
 
@@ -337,10 +356,12 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
 
             dprintf(fd, "{\"frame\":%d,\"ip\":\"0x" REGFORMAT "\","
                     "\"function\":\"%s\",\"sp\":\"0x" REGFORMAT "\"}",
-                    nptrs, (long) ip, fname[0] ? fname : "??", (long) sp);
+                    nptrs, (unsigned long) ip, fname[0] ? fname : "??",
+                    (unsigned long) sp);
 
             first_frame = 0;
-        }
+            nptrs++;
+        } while (unw_step(&cursor) > 0);
 
         dprintf(fd, "]}\n");
 
@@ -370,21 +391,36 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
 
     dprintf(fd, "Stack trace:\n");
 
+#if defined(UNW_TARGET_X86_64) || defined(UNW_TARGET_AARCH64)
+    /* Start at the faulting instruction, not the signal handler. */
+    ngx_memcpy(&uc, ptr, ngx_min(sizeof(uc), sizeof(ucontext_t)));
+#else
     ret = unw_getcontext(&uc);
     if (ret != UNW_ESUCCESS) {
-        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, ngx_errno,
-                      "ngx_backtrace: Problems with unw_getcontext() ret=%d",
-                      ret);
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                      "ngx_backtrace: unw_getcontext() failed: %d", ret);
         goto invalid;
     }
+#endif
 
+#if defined(UNW_TARGET_AARCH64)
+    /* The saved PC is exact, including a fault on the first instruction. */
+    ret = unw_init_local2(&cursor, &uc, UNW_INIT_SIGNAL_FRAME);
+#else
     ret = unw_init_local(&cursor, &uc);
+#endif
     if (ret != 0) {
         dprintf(fd, "problems with unw_init_local() failed: ret=%d\n", ret);
         goto invalid;
     }
 
-    for (nptrs = 0; unw_step(&cursor) > 0; nptrs++) {
+#if !defined(UNW_TARGET_X86_64) && !defined(UNW_TARGET_AARCH64)
+    /* Skip this handler's own frame on other architectures. */
+    unw_step(&cursor);
+#endif
+
+    nptrs = 0;
+    do {
         char fname[128] = { '\0', };
         unw_word_t ip, sp, offp;
 
@@ -415,8 +451,10 @@ ngx_error_signal_handler(int signo, siginfo_t *info, void *ptr)
         }
 
         dprintf(fd, "\t#%02d: 0x"REGFORMAT" in %s(), sp = 0x"REGFORMAT"\n",
-                nptrs, (long) ip, fname[0] ? fname : "??", (long) sp);
-    }
+                nptrs, (unsigned long) ip, fname[0] ? fname : "??",
+                (unsigned long) sp);
+        nptrs++;
+    } while (unw_step(&cursor) > 0);
 
     dprintf(fd, "End of stack trace.\n\n");
 
@@ -427,6 +465,12 @@ bye:
     return;
 
 invalid:
+
+    if (bcf->format == NGX_BACKTRACE_FORMAT_JSON) {
+        dprintf(fd, "%s{\"error\":\"unwind failed\",\"code\":%d}]}\n",
+                first_frame ? "" : ",", ret);
+        fsync(fd);
+    }
 
     kill(ngx_getpid(), signo);
 }
